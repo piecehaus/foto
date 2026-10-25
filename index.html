@@ -57,12 +57,26 @@
 			border-right: 0;
 		}
 
-		/* 사진: 섹션 너비에 맞춰 위아래로 쭈루룩 */
-		.col img {
+		/* 사진·영상: 섹션 너비에 맞춰 위아래로 쭈루룩 */
+		.col img,
+		.col video,
+		.col .embed {
 			display: block;
 			width: 100%;
 			height: auto;
-			margin-bottom: 12px;             /* 사진 사이 간격 */
+			margin-bottom: 12px;             /* 사진·영상 사이 간격 */
+		}
+
+		/* 유튜브·비메오 영상 칸: 가로 16 : 세로 9 */
+		.col .embed {
+			aspect-ratio: 16 / 9;
+		}
+
+		.col .embed iframe {
+			display: block;
+			width: 100%;
+			height: 100%;
+			border: 0;
 		}
 
 		.msg {
@@ -75,7 +89,9 @@
 				padding: 6px;
 			}
 
-			.col img {
+			.col img,
+			.col video,
+			.col .embed {
 				margin-bottom: 6px;
 			}
 		}
@@ -83,27 +99,48 @@
 </head>
 <body>
 
-<div class="head">I'm a photographer capturing the natural beauty of people.
+<div class="head">I capture the natural beauty of people and the world.
 Based in Seoul or anywhere. <a href="https://www.instagram.com/ologressi/">contact</a>  </div>
 
 <div class="wall">
-	<div class="col"></div>
-	<div class="col"></div>
-	<div class="col"></div>
+	<div class="col"></div>   <!-- 1번째 줄: 사진 -->
+	<div class="col"></div>   <!-- 2번째 줄: 사진 -->
+	<div class="col"></div>   <!-- 3번째 줄: 영상 -->
 </div>
 
 <p class="msg" id="msg">loading...</p>
 
-<!-- 아레나 채널의 사진을 모두 불러와 순서를 랜덤으로 섞은 뒤 섹션 1 → 2 → 3 → 1 … 에 넣어요 -->
+<!--
+	1·2번째 줄: friends 채널의 사진을 랜덤으로 섞어 번갈아 넣어요
+	3번째 줄: video 채널의 영상을 랜덤으로 섞어 넣어요
+-->
 <script>
-	var channel = "friends-qhmxcbtcejs";   // 아레나 채널 주소의 마지막 부분
+	var photoChannel = "friends-qhmxcbtcejs";   // 사진 채널 (주소의 마지막 부분)
+	var videoChannel = "video-ct2nvkemme4";     // 영상 채널 (주소의 마지막 부분)
 
 	var cols = document.querySelectorAll(".col");
 	var msg = document.getElementById("msg");
-	var photos = [];                       // 불러온 사진을 일단 여기에 모아 둠
 
-	// 새 방식(v3)으로 불러오기 — 다음 페이지가 있으면 계속
-	function loadV3(page) {
+	// 아레나 블록 하나를 { kind, src/html, title } 모양으로 정리
+	function tidy(b) {
+		var a = b.attachment;
+		if (a && a.url && (/video/.test(a.content_type || "") || /\.(mp4|webm|mov|m4v)(\?|$)/i.test(a.url))) {
+			return { kind: "video", src: a.url, title: b.title };
+		}
+		if (b.embed && b.embed.html) {
+			return { kind: "embed", html: b.embed.html, title: b.title };
+		}
+		if (b.image) {
+			var im = b.image;
+			var src = im.large ? (im.large.src || im.large.url)
+			                   : (im.src || (im.display && im.display.url) || (im.original && im.original.url));
+			if (src) return { kind: "image", src: src, title: b.title };
+		}
+		return null;   // 글·링크 등은 건너뜀
+	}
+
+	// 새 방식(v3)으로 채널 하나를 끝 페이지까지 불러오기
+	function loadV3(channel, page, list) {
 		return fetch("https://api.are.na/v3/channels/" + channel + "/contents?page=" + page)
 			.then(function (res) {
 				if (!res.ok) throw new Error(res.status);
@@ -111,15 +148,16 @@ Based in Seoul or anywhere. <a href="https://www.instagram.com/ologressi/">conta
 			})
 			.then(function (json) {
 				json.data.forEach(function (b) {
-					if (!b.image) return;
-					photos.push({ id: b.id, src: b.image.large ? b.image.large.src : b.image.src, title: b.title });
+					var item = tidy(b);
+					if (item) list.push(item);
 				});
-				if (json.meta && json.meta.has_more_pages) return loadV3(page + 1);
+				if (json.meta && json.meta.has_more_pages) return loadV3(channel, page + 1, list);
+				return list;
 			});
 	}
 
-	// 예전 방식(v2)으로 불러오기 — v3가 안 될 때 대신 사용
-	function loadV2(page) {
+	// 예전 방식(v2) — v3가 안 될 때 대신 사용
+	function loadV2(channel, page, list) {
 		return fetch("https://api.are.na/v2/channels/" + channel + "/contents?page=" + page + "&per=100")
 			.then(function (res) {
 				if (!res.ok) throw new Error(res.status);
@@ -127,11 +165,18 @@ Based in Seoul or anywhere. <a href="https://www.instagram.com/ologressi/">conta
 			})
 			.then(function (json) {
 				json.contents.forEach(function (b) {
-					if (!b.image) return;
-					photos.push({ id: b.id, src: (b.image.large || b.image.display || b.image.original).url, title: b.title });
+					var item = tidy(b);
+					if (item) list.push(item);
 				});
-				if (json.contents.length === 100) return loadV2(page + 1);
+				if (json.contents.length === 100) return loadV2(channel, page + 1, list);
+				return list;
 			});
+	}
+
+	function load(channel) {
+		return loadV3(channel, 1, []).catch(function () {
+			return loadV2(channel, 1, []);
+		});
 	}
 
 	// 순서를 랜덤으로 섞기 (들어올 때마다 바뀜)
@@ -144,36 +189,61 @@ Based in Seoul or anywhere. <a href="https://www.instagram.com/ologressi/">conta
 		}
 	}
 
-	// 섞은 사진을 섹션에 차례로 넣기 (클릭은 안 됨)
-	function render() {
-		shuffle(photos);
+	// 사진·영상 하나를 칸에 넣기 (클릭은 안 됨)
+	function put(item, col) {
+		var el;
 
-		photos.forEach(function (p, n) {
-			var img = document.createElement("img");
-			img.src = p.src;
-			img.alt = p.title || "";
-			img.loading = "lazy";
+		if (item.kind === "video") {
+			el = document.createElement("video");
+			el.src = item.src;
+			el.muted = true;          // 소리 없이
+			el.autoplay = true;       // 자동 재생
+			el.loop = true;           // 반복
+			el.playsInline = true;    // 아이폰에서 전체화면으로 안 튀어나가게
+			el.preload = "metadata";
+		} else if (item.kind === "embed") {
+			el = document.createElement("div");
+			el.className = "embed";
+			el.innerHTML = item.html;
+		} else {
+			el = document.createElement("img");
+			el.src = item.src;
+			el.alt = item.title || "";
+			el.loading = "lazy";
+		}
 
-			cols[n % 3].appendChild(img);
-		});
+		col.appendChild(el);
 	}
 
-	loadV3(1)
-		.catch(function () {
-			photos = [];
-			return loadV2(1);
-		})
-		.then(function () {
-			msg.remove();
-			if (photos.length === 0) {
-				document.querySelector(".wall").insertAdjacentHTML("afterend", '<p class="msg">아직 사진이 없어요.</p>');
-				return;
-			}
-			render();
-		})
-		.catch(function () {
-			msg.textContent = "사진을 불러오지 못했어요.";
-		});
+	Promise.all([
+		load(photoChannel).catch(function () { return null; }),
+		load(videoChannel).catch(function () { return null; })
+	]).then(function (result) {
+		var photos = result[0];
+		var videos = result[1];
+
+		msg.remove();
+
+		// 1·2번째 줄: 사진을 번갈아
+		if (photos) {
+			shuffle(photos);
+			photos.forEach(function (p, n) {
+				put(p, cols[n % 2]);
+			});
+		} else {
+			cols[0].innerHTML = '<p>사진을 불러오지 못했어요.</p>';
+		}
+
+		// 3번째 줄: 영상
+		if (videos) {
+			shuffle(videos);
+			videos.forEach(function (v) {
+				put(v, cols[2]);
+			});
+		} else {
+			cols[2].innerHTML = '<p>영상을 불러오지 못했어요.</p>';
+		}
+	});
 </script>
 
 </body>
