@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<link rel="stylesheet" href="style.css">
+	<meta charset="utf-8">
+	<title>foto</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+
+	<style>
+		* {
+			box-sizing: border-box;
+		}
+
+		/* 화면 자체는 고정: 페이지 전체 스크롤 없음 */
+		html, body {
+			height: 100%;
+			overflow: hidden;
+		}
+
+		body {
+			display: flex;
+			flex-direction: column;          /* 제목 줄 → 섹션 순서로 위아래 */
+			margin: 0;
+			background: white;
+			color: black;
+			font-family: sans-serif;
+			font-size: 15px;
+			line-height: 1.5;
+		}
+
+		a {
+			color: black;
+		}
+
+		/* 맨 위 제목 줄 */
+		.head {
+			padding: 10px 12px;
+			border-bottom: 1px solid black;
+		}
+
+		/* 세로 3섹션: 제목 줄 아래 남는 높이를 전부 차지 */
+		.wall {
+			flex: 1;
+			min-height: 0;
+			display: flex;
+		}
+
+		.col {
+			flex: 1;
+			min-width: 0;
+			padding: 12px;
+			overflow-y: auto;                /* 스크롤은 섹션 안에서만 */
+			border-right: 1px solid black;   /* 섹션 사이 세로선 */
+		}
+
+		.col:last-child {
+			border-right: 0;
+		}
+
+		/* 사진: 섹션 너비에 맞춰 위아래로 쭈루룩 */
+		.col img {
+			display: block;
+			width: 100%;
+			height: auto;
+			margin-bottom: 12px;             /* 사진 사이 간격 */
+		}
+
+		.msg {
+			padding: 12px;
+		}
+
+		/* 모바일: 3섹션은 그대로, 여백만 줄이기 */
+		@media screen and (max-width: 700px) {
+			.col {
+				padding: 6px;
+			}
+
+			.col img {
+				margin-bottom: 6px;
+			}
+		}
+	</style>
+</head>
+<body>
+
+<div class="head"><a href="https://www.instagram.com/ologressi/">commission</a></div>
+
+<div class="wall">
+	<div class="col"></div>
+	<div class="col"></div>
+	<div class="col"></div>
+</div>
+
+<p class="msg" id="msg">loading...</p>
+
+<!-- 아레나 채널의 사진을 모두 불러와 순서를 랜덤으로 섞은 뒤 섹션 1 → 2 → 3 → 1 … 에 넣어요 -->
+<script>
+	var channel = "friends-qhmxcbtcejs";   // 아레나 채널 주소의 마지막 부분
+
+	var cols = document.querySelectorAll(".col");
+	var msg = document.getElementById("msg");
+	var photos = [];                       // 불러온 사진을 일단 여기에 모아 둠
+
+	// 새 방식(v3)으로 불러오기 — 다음 페이지가 있으면 계속
+	function loadV3(page) {
+		return fetch("https://api.are.na/v3/channels/" + channel + "/contents?page=" + page)
+			.then(function (res) {
+				if (!res.ok) throw new Error(res.status);
+				return res.json();
+			})
+			.then(function (json) {
+				json.data.forEach(function (b) {
+					if (!b.image) return;
+					photos.push({ id: b.id, src: b.image.large ? b.image.large.src : b.image.src, title: b.title });
+				});
+				if (json.meta && json.meta.has_more_pages) return loadV3(page + 1);
+			});
+	}
+
+	// 예전 방식(v2)으로 불러오기 — v3가 안 될 때 대신 사용
+	function loadV2(page) {
+		return fetch("https://api.are.na/v2/channels/" + channel + "/contents?page=" + page + "&per=100")
+			.then(function (res) {
+				if (!res.ok) throw new Error(res.status);
+				return res.json();
+			})
+			.then(function (json) {
+				json.contents.forEach(function (b) {
+					if (!b.image) return;
+					photos.push({ id: b.id, src: (b.image.large || b.image.display || b.image.original).url, title: b.title });
+				});
+				if (json.contents.length === 100) return loadV2(page + 1);
+			});
+	}
+
+	// 순서를 랜덤으로 섞기 (들어올 때마다 바뀜)
+	function shuffle(list) {
+		for (var i = list.length - 1; i > 0; i--) {
+			var j = Math.floor(Math.random() * (i + 1));
+			var tmp = list[i];
+			list[i] = list[j];
+			list[j] = tmp;
+		}
+	}
+
+	// 섞은 사진을 섹션에 차례로 넣기 (클릭은 안 됨)
+	function render() {
+		shuffle(photos);
+
+		photos.forEach(function (p, n) {
+			var img = document.createElement("img");
+			img.src = p.src;
+			img.alt = p.title || "";
+			img.loading = "lazy";
+
+			cols[n % 3].appendChild(img);
+		});
+	}
+
+	loadV3(1)
+		.catch(function () {
+			photos = [];
+			return loadV2(1);
+		})
+		.then(function () {
+			msg.remove();
+			if (photos.length === 0) {
+				document.querySelector(".wall").insertAdjacentHTML("afterend", '<p class="msg">아직 사진이 없어요.</p>');
+				return;
+			}
+			render();
+		})
+		.catch(function () {
+			msg.textContent = "사진을 불러오지 못했어요.";
+		});
+</script>
+
+</body>
+</html>
